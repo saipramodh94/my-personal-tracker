@@ -3,7 +3,6 @@ import pandas as pd
 import datetime
 from supabase import create_client, Client
 import sys
-import plotly.express as px
 
 # -------------------------------
 # Page Configuration
@@ -11,90 +10,52 @@ import plotly.express as px
 st.set_page_config(page_title="Personal Hub", layout="wide", initial_sidebar_state="expanded")
 
 # -------------------------------
-# Custom Styling (Theme-Aware & Final Version)
+# Custom Styling
 # -------------------------------
 def local_css():
     st.markdown("""
         <style>
-            /* --- Universal Styles (Apply to BOTH themes) --- */
-            * {
-                font-family: 'Inter', sans-serif;
-            }
-            /* Input field reset to remove blue glow from password 'eye' icon */
+            /* --- Universal Styles --- */
+            * { font-family: 'Inter', sans-serif; }
             div[data-testid="stTextInput"] button:focus,
             div[data-testid="stTextInput"] button:focus-visible {
-                outline: none !important;
-                box-shadow: none !important;
-                border-color: transparent !important;
-                background-color: transparent !important;
+                outline: none !important; box-shadow: none !important;
+                border-color: transparent !important; background-color: transparent !important;
             }
-            /* General Buttons (Sea Blue) - FOR MAIN CONTENT AREA */
             div[data-testid="stFullScreenFrame"] div[data-testid="stButton"] > button,
             div[data-testid="stForm"] button {
-                background-color: #00dfff !important;
-                color: #1a1a1a !important;
-                font-weight: bold;
-                border: none !important;
-                border-radius: 20px;
-                padding: 10px 24px;
-                box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+                background-color: #00dfff !important; color: #1a1a1a !important;
+                font-weight: bold; border: none !important; border-radius: 20px;
+                padding: 10px 24px; box-shadow: 0 4px 8px rgba(0,0,0,0.1);
                 transition: all 0.3s ease;
             }
             div[data-testid="stFullScreenFrame"] div[data-testid="stButton"] > button:hover,
             div[data-testid="stForm"] button:hover {
-                background-color: #00b8d4 !important;
-                box-shadow: 0 6px 12px rgba(0,0,0,0.15);
+                background-color: #00b8d4 !important; box-shadow: 0 6px 12px rgba(0,0,0,0.15);
                 transform: translateY(-2px);
             }
-            
-            /* --- Sidebar Button Styling (Transparent) --- */
             div[data-testid="stSidebar"] div[data-testid="stButton"] > button {
-                background-color: transparent !important;
-                border: 1px solid #6c757d !important;
-                border-radius: 10px !important;
-                padding: 8px 16px !important;
+                background-color: transparent !important; border: 1px solid #6c757d !important;
+                border-radius: 10px !important; padding: 8px 16px !important;
             }
-             body[data-theme="dark"] div[data-testid="stSidebar"] div[data-testid="stButton"] > button {
-                color: #FAFAFA !important;
-            }
-             body[data-theme="light"] div[data-testid="stSidebar"] div[data-testid="stButton"] > button {
-                color: #31333F !important;
-            }
-            
-            /* --- Logout Button Styling --- */
+            body[data-theme="dark"] div[data-testid="stSidebar"] div[data-testid="stButton"] > button { color: #FAFAFA !important; }
+            body[data-theme="light"] div[data-testid="stSidebar"] div[data-testid="stButton"] > button { color: #31333F !important; }
             .logout-button-container div[data-testid="stButton"] > button {
-                background-color: #6c757d !important; /* Grey color */
-                color: white !important;
-                padding: 4px 12px !important; /* Smaller padding */
-                font-size: 14px !important;
-                font-weight: normal !important;
-                border-radius: 15px !important;
+                background-color: #6c757d !important; color: white !important;
+                padding: 4px 12px !important; font-size: 14px !important;
+                font-weight: normal !important; border-radius: 15px !important;
             }
-            .logout-button-container div[data-testid="stButton"] > button:hover {
-                background-color: #5a6268 !important; /* Darker grey on hover */
-            }
-
-            /* Metric Values (Gold) */
-            div[data-testid="stMetric"] div[data-testid="stMetricValue"] {
-                color: #FFD700 !important;
-            }
-
-            /* --- Section Container with Border --- */
+            .logout-button-container div[data-testid="stButton"] > button:hover { background-color: #5a6268 !important; }
+            div[data-testid="stMetric"] div[data-testid="stMetricValue"] { color: #FFD700 !important; }
             .section-container {
-                border-radius: 10px;
-                padding: 20px;
-                margin-bottom: 20px;
+                border-radius: 10px; padding: 20px; margin-bottom: 20px;
                 box-shadow: 0 4px 6px rgba(0,0,0,0.05);
             }
-
-            /* --- Light Theme Specific Styles --- */
             body[data-theme="light"] .stApp { background-color: #f0f2f6; }
             body[data-theme="light"] h1, body[data-theme="light"] h2, body[data-theme="light"] h3 { color: #262730 !important; }
             body[data-theme="light"] p, body[data-theme="light"] li, body[data-theme="light"] label { color: #31333F !important; }
             body[data-theme="light"] .section-container, body[data-theme="light"] div[data-testid="stMetric"] { background-color: #ffffff; border: 1px solid #e0e0e0; }
             body[data-theme="light"] div[data-testid="stMetric"] > label { color: #5f6368; }
-
-            /* --- Dark Theme Specific Styles --- */
             body[data-theme="dark"] .stApp { background-color: #0E1117; }
             body[data-theme="dark"] h1, body[data-theme="dark"] h2, body[data-theme="dark"] h3, body[data-theme="dark"] p, body[data-theme="dark"] li, body[data-theme="dark"] label { color: #FAFAFA !important; }
             body[data-theme="dark"] .section-container, body[data-theme="dark"] div[data-testid="stMetric"] { background-color: #262730; border: 1px solid #303338; }
@@ -119,7 +80,7 @@ def check_password():
         with st.form("login_form"):
             st.text_input("Username", key="username")
             st.text_input("Password", type="password", key="password")
-            submitted = st.form_submit_button("Login", use_container_width=True)
+            submitted = st.form_submit_button("Login", width='stretch')
 
             if submitted:
                 if st.session_state.get("username") in st.secrets["credentials"]["usernames"] and \
@@ -152,7 +113,7 @@ except (KeyError, FileNotFoundError):
     st.stop()
 
 # -------------------------------
-# Category Mapping
+# Category Mapping (for Finances)
 # -------------------------------
 CATEGORY_MAP = {
     "Income": {"Salary": ["-"], "Returns": ["-"], "Others": ["-"]},
@@ -170,47 +131,6 @@ CATEGORY_MAP = {
 }
 
 # -------------------------------
-# Supabase CRUD Functions
-# -------------------------------
-@st.cache_data(ttl=600)
-def get_all_transactions() -> pd.DataFrame:
-    try:
-        response = supabase.table("transactions").select("*").order("date", desc=True).execute()
-        df = pd.DataFrame(response.data)
-        if not df.empty:
-            df['date'] = pd.to_datetime(df['date']).dt.date
-        return df
-    except Exception as e:
-        st.error(f"Error fetching data: {e}")
-        return pd.DataFrame()
-
-def add_transaction(date, person, ttype, category, subcategory, desc, amount):
-    try:
-        new_row = {"date": date.isoformat(), "person": person, "type": ttype, "category": category, "sub_category": subcategory, "description": desc, "amount": round(amount, 2)}
-        supabase.table("transactions").insert(new_row).execute()
-        st.success("✅ Transaction added!")
-        st.cache_data.clear()
-    except Exception as e:
-        st.error(f"Error adding transaction: {e}")
-
-def update_transaction(transaction_id, date, person, ttype, category, subcategory, desc, amount):
-    try:
-        updated_row = {"date": date.isoformat(), "person": person, "type": ttype, "category": category, "sub_category": subcategory, "description": desc, "amount": round(amount, 2)}
-        supabase.table("transactions").update(updated_row).eq("id", transaction_id).execute()
-        st.success("✅ Transaction updated!")
-        st.cache_data.clear()
-    except Exception as e:
-        st.error(f"Error updating transaction: {e}")
-
-def delete_transaction(transaction_id):
-    try:
-        supabase.table("transactions").delete().eq("id", transaction_id).execute()
-        st.success("✅ Transaction deleted!")
-        st.cache_data.clear()
-    except Exception as e:
-        st.error(f"Error deleting transaction: {e}")
-
-# -------------------------------
 # Formatting Functions
 # -------------------------------
 def format_amount(amount):
@@ -223,6 +143,58 @@ def parse_amount(value):
         return 0.0
 
 # ===============================
+# SUPABASE CRUD FUNCTIONS
+# ===============================
+
+# --- Generic & Reusable Functions ---
+@st.cache_data(ttl=300)
+def get_all_data(table_name):
+    try:
+        response = supabase.table(table_name).select("*").order("created_at", desc=True).execute()
+        df = pd.DataFrame(response.data)
+        # Convert date columns if they exist
+        for col in ['date', 'due_date', 'reminder_date', 'event_date', 'start_date', 'end_date']:
+             if col in df.columns:
+                 df[col] = pd.to_datetime(df[col]).dt.date
+        return df
+    except Exception as e:
+        st.error(f"Error fetching data from {table_name}: {e}")
+        return pd.DataFrame()
+
+def add_record(table_name, data_dict):
+    try:
+        supabase.table(table_name).insert(data_dict).execute()
+        st.success(f"✅ Record added to {table_name}!")
+        st.cache_data.clear()
+    except Exception as e:
+        st.error(f"Error adding record: {e}")
+
+def delete_record(table_name, record_id):
+    try:
+        supabase.table(table_name).delete().eq("id", record_id).execute()
+        st.success(f"✅ Record deleted from {table_name}!")
+        st.cache_data.clear()
+    except Exception as e:
+        st.error(f"Error deleting record: {e}")
+
+# --- Specific Update Functions ---
+def update_transaction(transaction_id, data_dict):
+    try:
+        supabase.table("transactions").update(data_dict).eq("id", transaction_id).execute()
+        st.success("✅ Transaction updated!")
+        st.cache_data.clear()
+    except Exception as e:
+        st.error(f"Error updating transaction: {e}")
+
+def update_todo_status(todo_id, new_status):
+    try:
+        supabase.table("todos").update({"is_complete": new_status}).eq("id", todo_id).execute()
+        st.cache_data.clear()
+    except Exception as e:
+        st.error(f"Error updating To-Do status: {e}")
+
+
+# ===============================
 # PAGE DEFINITIONS
 # ===============================
 def page_home():
@@ -230,30 +202,47 @@ def page_home():
     st.write("Your central hub for a quick overview of everything.")
     
     st.subheader("Financial Summary")
-    df = get_all_transactions()
+    df = get_all_data("transactions")
     if df.empty:
-        st.info("No transactions yet. Add a transaction in the 'Finances' section to see your summary.")
+        st.info("No transactions yet. Add one in the 'Finances' section.")
     else:
+        df['amount'] = pd.to_numeric(df['amount'])
         total_income = df[df["type"] == "Income"]["amount"].sum()
         total_expense = df[df["type"] == "Expense"]["amount"].sum()
         net_balance = total_income - total_expense
         num_transactions = len(df)
         col1, col2, col3, col4 = st.columns(4)
-        col1.metric(label="Total Income", value=format_amount(total_income))
-        col2.metric(label="Total Expense", value=format_amount(total_expense), delta=format_amount(-total_expense))
-        col3.metric(label="Net Balance", value=format_amount(net_balance))
-        col4.metric(label="Total Transactions", value=num_transactions)
+        col1.metric("Total Income", format_amount(total_income))
+        col2.metric("Total Expense", format_amount(total_expense), delta=format_amount(-total_expense))
+        col3.metric("Net Balance", format_amount(net_balance))
+        col4.metric("Total Transactions", num_transactions)
 
     st.divider()
+    
     col1, col2, col3 = st.columns(3)
     with col1:
-        st.info("Upcoming Dates summary will be shown here.")
+        st.subheader("🗓️ Upcoming Dates")
+        df_dates = get_all_data("impdates").head(5)
+        if not df_dates.empty:
+            st.dataframe(df_dates[['event_name', 'event_date']], width='stretch', hide_index=True)
+        else:
+            st.info("No upcoming dates.")
     with col2:
-        st.info("Reminders summary will be shown here.")
+        st.subheader("⏰ Active Reminders")
+        df_reminders = get_all_data("reminders").head(5)
+        if not df_reminders.empty:
+            st.dataframe(df_reminders[['title', 'reminder_date']], width='stretch', hide_index=True)
+        else:
+            st.info("No active reminders.")
     with col3:
-        st.info("Travel Plans summary will be shown here.")
+        st.subheader("✈️ Planned Travel")
+        df_travel = get_all_data("travel").head(5)
+        if not df_travel.empty:
+            st.dataframe(df_travel[['destination', 'start_date']], width='stretch', hide_index=True)
+        else:
+            st.info("No travel planned.")
 
-
+# --- FINANCE PAGES ---
 def page_add_transaction():
     st.header("➕ Add New Transaction")
     col1, col2 = st.columns(2)
@@ -269,25 +258,23 @@ def page_add_transaction():
         desc = st.text_input("Description")
         amount_input = st.text_input("Amount", "0")
     
-    _, submit_col, _ = st.columns([1, 0.5, 1])
-    with submit_col:
-        if st.button("Add Transaction"):
-            amount = parse_amount(amount_input)
-            if amount > 0:
-                add_transaction(date, person, ttype, category, subcategory, desc, amount)
-                st.rerun()
-            else:
-                st.warning("Amount must be greater than zero.")
+    if st.button("Add Transaction"):
+        amount = parse_amount(amount_input)
+        if amount > 0:
+            data = {"date": date.isoformat(), "person": person, "type": ttype, "category": category, "sub_category": subcategory, "description": desc, "amount": round(amount, 2)}
+            add_record("transactions", data)
+        else:
+            st.warning("Amount must be greater than zero.")
 
 def page_update_transaction():
     st.header("✏️ Update / Delete a Transaction")
-    df = get_all_transactions()
+    df = get_all_data("transactions")
     if df.empty:
         st.info("No transactions available to update.")
         return
 
     st.subheader("Recent Transactions")
-    st.dataframe(df[['id', 'date', 'person', 'category', 'description', 'amount']].head(20), use_container_width=True, hide_index=True)
+    st.dataframe(df[['id', 'date', 'person', 'category', 'description', 'amount']].head(20), width='stretch', hide_index=True)
     st.divider()
 
     transaction_id_to_edit = st.number_input("Enter Transaction ID to Edit/Delete", min_value=1, step=1, value=None)
@@ -295,7 +282,8 @@ def page_update_transaction():
         selected_row_df = df[df['id'] == transaction_id_to_edit]
         if not selected_row_df.empty:
             selected_row = selected_row_df.iloc[0]
-            st.subheader("Edit Transaction Details")
+            st.subheader(f"Editing Transaction ID: {transaction_id_to_edit}")
+
             col1, col2 = st.columns(2)
             with col1:
                 date = st.date_input("Date", value=selected_row['date'], key=f"date_{transaction_id_to_edit}")
@@ -305,54 +293,153 @@ def page_update_transaction():
                 categories = list(CATEGORY_MAP.get(ttype, {}).keys())
                 cat_index = categories.index(selected_row['category']) if selected_row['category'] in categories else 0
                 category = st.selectbox("Category", categories, index=cat_index, key=f"category_{transaction_id_to_edit}")
+                
                 subcategories = CATEGORY_MAP.get(ttype, {}).get(category, ["-"])
                 sub_cat_index = subcategories.index(selected_row['sub_category']) if selected_row['sub_category'] in subcategories else 0
                 subcategory = st.selectbox("Sub-Category", subcategories, index=sub_cat_index, key=f"subcategory_{transaction_id_to_edit}")
+                
                 desc = st.text_input("Description", value=selected_row['description'], key=f"desc_{transaction_id_to_edit}")
                 amount_input = st.text_input("Amount", value=str(selected_row['amount']), key=f"amount_{transaction_id_to_edit}")
             
-            update_col, delete_col = st.columns([1, 1])
+            update_col, delete_col = st.columns(2)
             with update_col:
                 if st.button("Update Transaction", key=f"update_btn_{transaction_id_to_edit}"):
                     amount = parse_amount(amount_input)
                     if amount > 0:
-                        update_transaction(transaction_id_to_edit, date, person, ttype, category, subcategory, desc, amount)
+                        updated_data = {"date": date.isoformat(), "person": person, "type": ttype, "category": category, "sub_category": subcategory, "description": desc, "amount": round(amount, 2)}
+                        update_transaction(transaction_id_to_edit, updated_data)
                         st.rerun()
                     else:
                         st.warning("Amount must be greater than zero.")
             with delete_col:
-                if st.button("Delete Transaction", key=f"delete_btn_{transaction_id_to_edit}"):
-                    delete_transaction(transaction_id_to_edit)
+                if st.button("Delete Transaction", key=f"delete_btn_{transaction_id_to_edit}", type="primary"):
+                    delete_record("transactions", transaction_id_to_edit)
                     st.rerun()
         else:
             st.warning("Transaction ID not found.")
 
 def page_view_summary():
     st.header("📊 Expense Summaries")
-    df = get_all_transactions()
-    for p in ["Pramodh", "Manasa", "Ours"]:
+    df = get_all_data("transactions")
+    if df.empty:
+        st.info("No transactions to display.")
+        return
+
+    df['amount'] = pd.to_numeric(df['amount'])
+    persons = ["Pramodh", "Manasa", "Ours"]
+    for p in persons:
         st.subheader(f"👤 {p}'s Summary")
         df_person = df[df["person"] == p]
         if df_person.empty:
             st.info(f"No transactions yet for {p}.")
         else:
-            df_person['amount'] = pd.to_numeric(df_person['amount'], errors='coerce').fillna(0)
-            df_person["sub_category"] = df_person.apply(lambda row: row["description"] if row["category"] == "Others" else row["sub_category"], axis=1)
             total_income = df_person[df_person["type"] == "Income"]["amount"].sum()
             total_expense = df_person[df_person["type"] == "Expense"]["amount"].sum()
-            balance = total_income - total_expense
             col1, col2, col3 = st.columns(3)
             col1.metric("Total Income", format_amount(total_income))
             col2.metric("Total Expense", format_amount(total_expense))
-            col3.metric("Balance", format_amount(balance))
-            summary_df = df_person[df_person["type"] == "Expense"].copy()
-            if not summary_df.empty:
-                summary_df = summary_df.groupby(["category", "sub_category"])["amount"].sum().reset_index()
-                summary_df["Amount"] = summary_df["amount"].apply(format_amount)
-                st.dataframe(summary_df.sort_values("amount", ascending=False)[["category", "sub_category", "Amount"]], use_container_width=True, hide_index=True)
-            else:
-                st.write("No expenses recorded.")
+            col3.metric("Balance", format_amount(total_income - total_expense))
         st.divider()
+
+# --- TO-DO PAGE ---
+def page_todo():
+    st.header("✅ To-Do List")
+    with st.expander("➕ Add a new To-Do item", expanded=False):
+        with st.form("add_todo_form"):
+            item = st.text_input("To-Do Item")
+            due_date = st.date_input("Complete by", value=None)
+            assigned_user = st.selectbox("Assign to", ["Pramodh", "Manasa", "Ours"])
+            submitted = st.form_submit_button("Add To-Do")
+            if submitted and item:
+                data = {"item": item, "due_date": due_date.isoformat() if due_date else None, "assigned_user": assigned_user}
+                add_record("todos", data)
+                st.rerun()
+
+    df_todos = get_all_data("todos")
+    if not df_todos.empty:
+        for index, row in df_todos.iterrows():
+            col1, col2, col3 = st.columns([0.1, 0.8, 0.1])
+            with col1:
+                is_complete = st.checkbox("", value=row['is_complete'], key=f"todo_{row['id']}")
+                if is_complete != row['is_complete']:
+                    update_todo_status(row['id'], is_complete)
+                    st.rerun()
+            with col2:
+                st.markdown(f"**{row['item']}** (for {row['assigned_user']}) - *Due: {row['due_date'] or 'N/A'}*")
+            with col3:
+                if st.button("❌", key=f"del_todo_{row['id']}"):
+                    delete_record("todos", row['id'])
+                    st.rerun()
+    else:
+        st.info("No to-do items yet.")
+
+# --- REMINDERS PAGE ---
+def page_reminders():
+    st.header("⏰ Reminders")
+    with st.expander("➕ Add a new Reminder", expanded=False):
+        with st.form("add_reminder_form"):
+            title = st.text_input("Reminder Title")
+            reminder_date = st.date_input("Reminder Date")
+            assigned_user = st.selectbox("For", ["Pramodh", "Manasa", "Ours"])
+            details = st.text_area("Details (optional)")
+            submitted = st.form_submit_button("Add Reminder")
+            if submitted and title:
+                data = {"title": title, "reminder_date": reminder_date.isoformat(), "assigned_user": assigned_user, "details": details}
+                add_record("reminders", data)
+                st.rerun()
+    
+    df_reminders = get_all_data("reminders")
+    if not df_reminders.empty:
+        st.dataframe(df_reminders[['title', 'reminder_date', 'assigned_user', 'details']], width='stretch', hide_index=True)
+    else:
+        st.info("No reminders yet. Add one above.")
+
+# --- IMPORTANT DATES PAGE ---
+def page_important_dates():
+    st.header("🗓️ Important Dates")
+    with st.expander("➕ Add a new Important Date", expanded=False):
+        with st.form("add_impdate_form"):
+            event_name = st.text_input("Event Name (e.g., Manasa's Birthday)")
+            event_date = st.date_input("Event Date")
+            category = st.selectbox("Category", ["Birthday", "Anniversary", "Holiday", "Other"])
+            notes = st.text_area("Notes (optional)")
+            submitted = st.form_submit_button("Add Date")
+            if submitted and event_name:
+                data = {"event_name": event_name, "event_date": event_date.isoformat(), "category": category, "notes": notes}
+                add_record("impdates", data)
+                st.rerun()
+
+    df_impdates = get_all_data("impdates")
+    if not df_impdates.empty:
+        st.dataframe(df_impdates[['event_name', 'event_date', 'category', 'notes']], width='stretch', hide_index=True)
+    else:
+        st.info("No important dates yet. Add one above.")
+
+# --- TRAVEL PAGE ---
+def page_travel():
+    st.header("✈️ Travel Planner")
+    with st.expander("➕ Add a new Trip", expanded=False):
+        with st.form("add_travel_form"):
+            destination = st.text_input("Destination")
+            start_date = st.date_input("Start Date")
+            end_date = st.date_input("End Date")
+            status = st.selectbox("Status", ["Planned", "Booked", "Completed"])
+            notes = st.text_area("Notes (Flight details, hotel, etc.)")
+            submitted = st.form_submit_button("Add Trip")
+            if submitted and destination:
+                if start_date <= end_date:
+                    data = {"destination": destination, "start_date": start_date.isoformat(), "end_date": end_date.isoformat(), "status": status, "notes": notes}
+                    add_record("travel", data)
+                    st.rerun()
+                else:
+                    st.warning("End date must be on or after the start date.")
+    
+    df_travel = get_all_data("travel")
+    if not df_travel.empty:
+        st.dataframe(df_travel[['destination', 'start_date', 'end_date', 'status', 'notes']], width='stretch', hide_index=True)
+    else:
+        st.info("No travel plans yet. Add one above.")
+
 
 # ===============================
 # MAIN APP UI & NAVIGATION
@@ -376,14 +463,14 @@ if 'page' not in st.session_state:
     st.session_state.page = "Home"
 
 with st.sidebar:
-    if st.button("🏠 Home", use_container_width=True):
+    if st.button("🏠 Home", width='stretch'):
         st.session_state.page = "Home"
         st.rerun()
 
-    if st.button("💰 Finances", use_container_width=True):
+    if st.button("💰 Finances", width='stretch'):
         if not st.session_state.page.startswith("Finances"):
-            st.session_state.page = "Finances_Add Transaction"
-        st.rerun()
+            st.session_state.page = "Finances_Add_Transaction"
+            st.rerun()
     
     if st.session_state.page.startswith("Finances"):
         sub_page_options = ["Add Transaction", "Update / Delete", "View Summaries"]
@@ -406,42 +493,38 @@ with st.sidebar:
             st.session_state.page = new_page_state
             st.rerun()
 
-    if st.button("✅ To-Do", use_container_width=True):
+    if st.button("✅ To-Do", width='stretch'):
         st.session_state.page = "To-Do"
         st.rerun()
-    if st.button("⏰ Reminders", use_container_width=True):
+    if st.button("⏰ Reminders", width='stretch'):
         st.session_state.page = "Reminders"
         st.rerun()
-    if st.button("🗓️ Important Dates", use_container_width=True):
+    if st.button("🗓️ Important Dates", width='stretch'):
         st.session_state.page = "Important Dates"
         st.rerun()
-    if st.button("✈️ Travel", use_container_width=True):
+    if st.button("✈️ Travel", width='stretch'):
         st.session_state.page = "Travel"
         st.rerun()
 
 # --- Page Routing ---
-current_page = st.session_state.get('page', 'Home')
+page_key = st.session_state.get('page', 'Home')
 
-if current_page == "Home":
+if page_key == "Home":
     page_home()
-elif current_page == "Finances_Add_Transaction":
+elif page_key == "Finances_Add_Transaction":
     page_add_transaction()
-elif current_page == "Finances_Update_/_Delete":
+elif page_key == "Finances_Update_/_Delete":
     page_update_transaction()
-elif current_page == "Finances_View_Summaries":
+elif page_key == "Finances_View_Summaries":
     page_view_summary()
-elif current_page == "To-Do":
-    st.header("✅ To-Do List")
-    st.info("This feature is coming soon!")
-elif current_page == "Reminders":
-    st.header("⏰ Reminders")
-    st.info("This feature is coming soon!")
-elif current_page == "Important Dates":
-    st.header("🗓️ Important Dates")
-    st.info("This feature is coming soon!")
-elif current_page == "Travel":
-    st.header("✈️ Travel Planner")
-    st.info("This feature is coming soon!")
+elif page_key == "To-Do":
+    page_todo()
+elif page_key == "Reminders":
+    page_reminders()
+elif page_key == "Important Dates":
+    page_important_dates()
+elif page_key == "Travel":
+    page_travel()
 else:
     page_home()
 
