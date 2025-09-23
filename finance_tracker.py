@@ -2,7 +2,9 @@ import streamlit as st
 import pandas as pd
 import datetime
 from supabase import create_client, Client
-import sys
+import plotly.express as px
+import calendar
+import time
 
 # -------------------------------
 # Page Configuration
@@ -69,27 +71,42 @@ local_css()
 # Authentication
 # -------------------------------
 def check_password():
+    """Returns `True` if the user is authenticated, `False` otherwise."""
+    # 1. Check if user is already authenticated and session is not expired
     if st.session_state.get("authenticated", False):
-        return True
+        # Check for session timeout (1 hour = 3600 seconds)
+        if time.time() - st.session_state.get("login_time", 0) > 3600:
+            # Clear all session state keys if expired
+            for key in list(st.session_state.keys()):
+                del st.session_state[key]
+            st.warning("Your session has expired. Please log in again.")
+            st.rerun()
+        else:
+            return True # Session is active and valid
 
+    # 2. If not authenticated, show the login form
     st.title("Welcome Pramodh & Manasa")
     st.write("")
-
     _, col2, _ = st.columns([1, 1, 1])
     with col2:
         with st.form("login_form"):
             st.text_input("Username", key="username")
             st.text_input("Password", type="password", key="password")
-            submitted = st.form_submit_button("Login", width='stretch')
+            submitted = st.form_submit_button("Login", use_container_width=True)
 
             if submitted:
+                # Check if the username and password are correct
                 if st.session_state.get("username") in st.secrets["credentials"]["usernames"] and \
                    st.secrets["credentials"]["usernames"][st.session_state.get("username")] == st.session_state.get("password"):
                     
                     st.session_state["authenticated"] = True
                     st.session_state["user"] = st.session_state.get("username")
+                    st.session_state["login_time"] = time.time()  # Store login time
+                    
+                    # Clean up credentials from session state
                     if "password" in st.session_state: del st.session_state["password"]
                     if "username" in st.session_state: del st.session_state["username"]
+                    
                     st.rerun()
                 else:
                     st.error("Invalid username or password")
@@ -145,17 +162,14 @@ def parse_amount(value):
 # ===============================
 # SUPABASE CRUD FUNCTIONS
 # ===============================
-
-# --- Generic & Reusable Functions ---
 @st.cache_data(ttl=300)
 def get_all_data(table_name):
     try:
         response = supabase.table(table_name).select("*").order("created_at", desc=True).execute()
         df = pd.DataFrame(response.data)
-        # Convert date columns if they exist
         for col in ['date', 'due_date', 'reminder_date', 'event_date', 'start_date', 'end_date']:
              if col in df.columns:
-                 df[col] = pd.to_datetime(df[col]).dt.date
+                 df[col] = pd.to_datetime(df[col], errors='coerce').dt.date
         return df
     except Exception as e:
         st.error(f"Error fetching data from {table_name}: {e}")
@@ -169,6 +183,14 @@ def add_record(table_name, data_dict):
     except Exception as e:
         st.error(f"Error adding record: {e}")
 
+def update_record(table_name, record_id, data_dict):
+    try:
+        supabase.table(table_name).update(data_dict).eq("id", record_id).execute()
+        st.success(f"✅ Record updated in {table_name}!")
+        st.cache_data.clear()
+    except Exception as e:
+        st.error(f"Error updating record: {e}")
+
 def delete_record(table_name, record_id):
     try:
         supabase.table(table_name).delete().eq("id", record_id).execute()
@@ -177,15 +199,6 @@ def delete_record(table_name, record_id):
     except Exception as e:
         st.error(f"Error deleting record: {e}")
 
-# --- Specific Update Functions ---
-def update_transaction(transaction_id, data_dict):
-    try:
-        supabase.table("transactions").update(data_dict).eq("id", transaction_id).execute()
-        st.success("✅ Transaction updated!")
-        st.cache_data.clear()
-    except Exception as e:
-        st.error(f"Error updating transaction: {e}")
-
 def update_todo_status(todo_id, new_status):
     try:
         supabase.table("todos").update({"is_complete": new_status}).eq("id", todo_id).execute()
@@ -193,6 +206,64 @@ def update_todo_status(todo_id, new_status):
     except Exception as e:
         st.error(f"Error updating To-Do status: {e}")
 
+# ===============================
+# HELPER FUNCTIONS FOR HOME PAGE
+# ===============================
+def get_relativedelta_text(start_date, end_date):
+    """Calculates years, months, days between two dates and returns a formatted string."""
+    if start_date > end_date:
+        return "In the past"
+
+    years = end_date.year - start_date.year
+    months = end_date.month - start_date.month
+    days = end_date.day - start_date.day
+
+    if days < 0:
+        months -= 1
+        prev_month_year = end_date.year if end_date.month > 1 else end_date.year - 1
+        prev_month = end_date.month - 1 if end_date.month > 1 else 12
+        days += calendar.monthrange(prev_month_year, prev_month)[1]
+    
+    if months < 0:
+        years -= 1
+        months += 12
+    
+    parts = []
+    if years > 0: parts.append(f"{years}y")
+    if months > 0: parts.append(f"{months}m")
+    if days > 0 or not parts: parts.append(f"{days}d")
+        
+    return ", ".join(parts)
+
+def calculate_anniversary_details(event_date):
+    """Calculates age and time to next anniversary for a given date."""
+    if pd.isnull(event_date):
+        return None, None
+
+    today = datetime.date.today()
+    if not isinstance(event_date, datetime.date):
+        event_date = pd.to_datetime(event_date).date()
+
+    # 1. Time passed since original event
+    time_passed_str = get_relativedelta_text(event_date, today)
+
+    # 2. Find next occurrence
+    next_occurrence_year = today.year
+    if (today.month, today.day) > (event_date.month, event_date.day):
+        next_occurrence_year += 1
+    
+    try:
+        next_event_date = event_date.replace(year=next_occurrence_year)
+    except ValueError: # Handle Feb 29 on non-leap years
+        next_event_date = datetime.date(next_occurrence_year, 2, 28)
+
+    # 3. Time until next occurrence
+    if next_event_date == today:
+        time_to_next_str = "🎉 Today!"
+    else:
+        time_to_next_str = get_relativedelta_text(today, next_event_date)
+        
+    return time_passed_str, time_to_next_str
 
 # ===============================
 # PAGE DEFINITIONS
@@ -201,10 +272,18 @@ def page_home():
     st.header("🏠 Home Dashboard")
     st.write("Your central hub for a quick overview of everything.")
     
-    st.subheader("Financial Summary")
+    # --- Financial Summary with Shortcut ---
+    col_title, col_button = st.columns([0.8, 0.2])
+    with col_title:
+        st.subheader("Financial Summary")
+    with col_button:
+        if st.button("➕ Add Transaction", use_container_width=True):
+            st.session_state.page = "Finances_Add_Transaction"
+            st.rerun()
+
     df = get_all_data("transactions")
     if df.empty:
-        st.info("No transactions yet. Add one in the 'Finances' section.")
+        st.info("No transactions yet. Click the button above to add one.")
     else:
         df['amount'] = pd.to_numeric(df['amount'])
         total_income = df[df["type"] == "Income"]["amount"].sum()
@@ -219,26 +298,43 @@ def page_home():
 
     st.divider()
     
+    # --- Dashboard Cards ---
     col1, col2, col3 = st.columns(3)
     with col1:
-        st.subheader("🗓️ Upcoming Dates")
+        st.subheader("🗓️ Important Dates")
         df_dates = get_all_data("impdates").head(5)
+        
         if not df_dates.empty:
-            st.dataframe(df_dates[['event_name', 'event_date']], width='stretch', hide_index=True)
+            display_df_data = []
+            for index, row in df_dates.iterrows():
+                passed_str, next_str = calculate_anniversary_details(row['event_date'])
+                if passed_str and next_str:
+                    display_df_data.append({
+                        "Event": f"{row['event_name']} ({row['category']})",
+                        "Passed": passed_str,
+                        "Next In": next_str
+                    })
+            
+            if display_df_data:
+                display_df = pd.DataFrame(display_df_data)
+                st.dataframe(display_df, hide_index=True, use_container_width=True)
         else:
-            st.info("No upcoming dates.")
+            st.info("No important dates.")
+            
     with col2:
-        st.subheader("⏰ Active Reminders")
-        df_reminders = get_all_data("reminders").head(5)
-        if not df_reminders.empty:
-            st.dataframe(df_reminders[['title', 'reminder_date']], width='stretch', hide_index=True)
+        st.subheader("✅ Upcoming To-Dos")
+        df_todos = get_all_data("todos")
+        upcoming_todos = df_todos[df_todos['is_complete'] == False].sort_values(by="due_date").head(5)
+        if not upcoming_todos.empty:
+            st.dataframe(upcoming_todos[['item', 'due_date', 'assigned_user']], use_container_width=True, hide_index=True)
         else:
-            st.info("No active reminders.")
+            st.info("No upcoming to-do items.")
+            
     with col3:
         st.subheader("✈️ Planned Travel")
         df_travel = get_all_data("travel").head(5)
         if not df_travel.empty:
-            st.dataframe(df_travel[['destination', 'start_date']], width='stretch', hide_index=True)
+            st.dataframe(df_travel[['destination', 'start_date']], use_container_width=True, hide_index=True)
         else:
             st.info("No travel planned.")
 
@@ -252,68 +348,91 @@ def page_add_transaction():
         ttype = st.selectbox("Type", ["Expense", "Income"])
     with col2:
         categories = list(CATEGORY_MAP.get(ttype, {}).keys())
-        category = st.selectbox("Category", categories)
-        subcategories = CATEGORY_MAP.get(ttype, {}).get(category, ["-"])
-        subcategory = st.selectbox("Sub-Category", subcategories)
-        desc = st.text_input("Description")
+        category = st.selectbox("Category", categories, key="add_category")
+        
+        subcategory = None
+        if category != "Others":
+            subcategories = CATEGORY_MAP.get(ttype, {}).get(category, ["-"])
+            subcategory = st.selectbox("Sub-Category", subcategories, key="add_subcategory")
+
+        desc_label = "Description (Mandatory for 'Others')" if category == "Others" else "Description"
+        desc = st.text_input(desc_label)
         amount_input = st.text_input("Amount", "0")
     
     if st.button("Add Transaction"):
-        amount = parse_amount(amount_input)
-        if amount > 0:
-            data = {"date": date.isoformat(), "person": person, "type": ttype, "category": category, "sub_category": subcategory, "description": desc, "amount": round(amount, 2)}
-            add_record("transactions", data)
+        if category == "Others" and not desc:
+            st.warning("Description is mandatory when 'Others' category is selected.")
         else:
-            st.warning("Amount must be greater than zero.")
+            amount = parse_amount(amount_input)
+            if amount > 0:
+                final_subcategory = desc if category == "Others" else subcategory
+                data = {
+                    "date": date.isoformat(), "person": person, "type": ttype, 
+                    "category": category, "sub_category": final_subcategory, 
+                    "description": desc, "amount": round(amount, 2)
+                }
+                add_record("transactions", data)
+                st.rerun()
+            else:
+                st.warning("Amount must be greater than zero.")
 
 def page_update_transaction():
-    st.header("✏️ Update / Delete a Transaction")
+    st.header("✏️ Update / Delete Transaction")
     df = get_all_data("transactions")
     if df.empty:
-        st.info("No transactions available to update.")
+        st.info("No transactions available.")
         return
 
-    st.subheader("Recent Transactions")
-    st.dataframe(df[['id', 'date', 'person', 'category', 'description', 'amount']].head(20), width='stretch', hide_index=True)
+    st.dataframe(df[['id', 'date', 'person', 'category', 'description', 'amount']].head(20), use_container_width=True, hide_index=True)
     st.divider()
 
-    transaction_id_to_edit = st.number_input("Enter Transaction ID to Edit/Delete", min_value=1, step=1, value=None)
-    if transaction_id_to_edit:
-        selected_row_df = df[df['id'] == transaction_id_to_edit]
-        if not selected_row_df.empty:
-            selected_row = selected_row_df.iloc[0]
-            st.subheader(f"Editing Transaction ID: {transaction_id_to_edit}")
-
+    transaction_id = st.number_input("Enter Transaction ID to Edit/Delete", min_value=1, step=1, value=None)
+    if transaction_id:
+        selected_row = df[df['id'] == transaction_id]
+        if not selected_row.empty:
+            item = selected_row.iloc[0]
+            st.subheader(f"Editing Transaction ID: {transaction_id}")
             col1, col2 = st.columns(2)
             with col1:
-                date = st.date_input("Date", value=selected_row['date'], key=f"date_{transaction_id_to_edit}")
-                person = st.selectbox("Person", ["Pramodh", "Manasa", "Ours"], index=["Pramodh", "Manasa", "Ours"].index(selected_row['person']), key=f"person_{transaction_id_to_edit}")
-                ttype = st.selectbox("Type", ["Expense", "Income"], index=["Expense", "Income"].index(selected_row['type']), key=f"type_{transaction_id_to_edit}")
+                date = st.date_input("Date", value=item['date'], key=f"date_{transaction_id}")
+                person = st.selectbox("Person", ["Pramodh", "Manasa", "Ours"], index=["Pramodh", "Manasa", "Ours"].index(item['person']), key=f"person_{transaction_id}")
+                ttype = st.selectbox("Type", ["Expense", "Income"], index=["Expense", "Income"].index(item['type']), key=f"type_{transaction_id}")
             with col2:
                 categories = list(CATEGORY_MAP.get(ttype, {}).keys())
-                cat_index = categories.index(selected_row['category']) if selected_row['category'] in categories else 0
-                category = st.selectbox("Category", categories, index=cat_index, key=f"category_{transaction_id_to_edit}")
+                cat_index = categories.index(item['category']) if item['category'] in categories else 0
+                category = st.selectbox("Category", categories, index=cat_index, key=f"cat_{transaction_id}")
                 
-                subcategories = CATEGORY_MAP.get(ttype, {}).get(category, ["-"])
-                sub_cat_index = subcategories.index(selected_row['sub_category']) if selected_row['sub_category'] in subcategories else 0
-                subcategory = st.selectbox("Sub-Category", subcategories, index=sub_cat_index, key=f"subcategory_{transaction_id_to_edit}")
-                
-                desc = st.text_input("Description", value=selected_row['description'], key=f"desc_{transaction_id_to_edit}")
-                amount_input = st.text_input("Amount", value=str(selected_row['amount']), key=f"amount_{transaction_id_to_edit}")
+                subcategory = item['sub_category']
+                if category != "Others":
+                    subcategories = CATEGORY_MAP.get(ttype, {}).get(category, ["-"])
+                    sub_cat_index = subcategories.index(item['sub_category']) if item['sub_category'] in subcategories else 0
+                    subcategory = st.selectbox("Sub-Category", subcategories, index=sub_cat_index, key=f"subcat_{transaction_id}")
+
+                desc_label = "Description (Mandatory for 'Others')" if category == "Others" else "Description"
+                desc = st.text_input(desc_label, value=item['description'], key=f"desc_{transaction_id}")
+                amount_input = st.text_input("Amount", value=str(item['amount']), key=f"amount_{transaction_id}")
             
             update_col, delete_col = st.columns(2)
             with update_col:
-                if st.button("Update Transaction", key=f"update_btn_{transaction_id_to_edit}"):
-                    amount = parse_amount(amount_input)
-                    if amount > 0:
-                        updated_data = {"date": date.isoformat(), "person": person, "type": ttype, "category": category, "sub_category": subcategory, "description": desc, "amount": round(amount, 2)}
-                        update_transaction(transaction_id_to_edit, updated_data)
-                        st.rerun()
+                if st.button("Update Transaction", key=f"upd_btn_{transaction_id}"):
+                    if category == "Others" and not desc:
+                        st.warning("Description is mandatory when 'Others' category is selected.")
                     else:
-                        st.warning("Amount must be greater than zero.")
+                        amount = parse_amount(amount_input)
+                        if amount > 0:
+                            final_subcategory = desc if category == "Others" else subcategory
+                            data = {
+                                "date": date.isoformat(), "person": person, "type": ttype, 
+                                "category": category, "sub_category": final_subcategory, 
+                                "description": desc, "amount": round(amount, 2)
+                            }
+                            update_record("transactions", transaction_id, data)
+                            st.rerun()
+                        else:
+                            st.warning("Amount must be greater than zero.")
             with delete_col:
-                if st.button("Delete Transaction", key=f"delete_btn_{transaction_id_to_edit}", type="primary"):
-                    delete_record("transactions", transaction_id_to_edit)
+                if st.button("Delete Transaction", key=f"del_btn_{transaction_id}", type="primary"):
+                    delete_record("transactions", transaction_id)
                     st.rerun()
         else:
             st.warning("Transaction ID not found.")
@@ -335,10 +454,37 @@ def page_view_summary():
         else:
             total_income = df_person[df_person["type"] == "Income"]["amount"].sum()
             total_expense = df_person[df_person["type"] == "Expense"]["amount"].sum()
-            col1, col2, col3 = st.columns(3)
-            col1.metric("Total Income", format_amount(total_income))
-            col2.metric("Total Expense", format_amount(total_expense))
-            col3.metric("Balance", format_amount(total_income - total_expense))
+            
+            # ROW 1: Metrics
+            metric_cols = st.columns(3)
+            metric_cols[0].metric("Total Income", format_amount(total_income))
+            metric_cols[1].metric("Total Expense", format_amount(total_expense))
+            metric_cols[2].metric("Balance", format_amount(total_income - total_expense))
+            
+            # ROW 2: Chart and Table
+            df_expense = df_person[df_person["type"] == "Expense"]
+            if not df_expense.empty:
+                chart_col, table_col = st.columns([0.4, 0.6])
+                
+                with chart_col:
+                    expense_by_cat = df_expense.groupby('category')['amount'].sum().reset_index()
+                    fig = px.pie(expense_by_cat, names='category', values='amount', title='Expense by Category',
+                                 hole=0.4, color_discrete_sequence=px.colors.sequential.RdBu)
+                    fig.update_layout(showlegend=False, height=300, margin=dict(l=10, r=10, t=30, b=10))
+                    st.plotly_chart(fig, use_container_width=True)
+                
+                with table_col:
+                    st.write("**Expense Details**")
+                    expense_details = df_expense.groupby(['category', 'sub_category'])['amount'].sum().reset_index().sort_values(by='amount', ascending=False)
+                    expense_details['Amount'] = expense_details['amount'].apply(format_amount)
+                    st.dataframe(
+                        expense_details[['category', 'sub_category', 'Amount']],
+                        hide_index=True,
+                        use_container_width=True
+                    )
+            else:
+                 st.info("No expenses recorded for this person.")
+
         st.divider()
 
 # --- TO-DO PAGE ---
@@ -373,77 +519,209 @@ def page_todo():
     else:
         st.info("No to-do items yet.")
 
-# --- REMINDERS PAGE ---
-def page_reminders():
-    st.header("⏰ Reminders")
-    with st.expander("➕ Add a new Reminder", expanded=False):
-        with st.form("add_reminder_form"):
-            title = st.text_input("Reminder Title")
-            reminder_date = st.date_input("Reminder Date")
-            assigned_user = st.selectbox("For", ["Pramodh", "Manasa", "Ours"])
-            details = st.text_area("Details (optional)")
-            submitted = st.form_submit_button("Add Reminder")
-            if submitted and title:
-                data = {"title": title, "reminder_date": reminder_date.isoformat(), "assigned_user": assigned_user, "details": details}
-                add_record("reminders", data)
-                st.rerun()
-    
-    df_reminders = get_all_data("reminders")
-    if not df_reminders.empty:
-        st.dataframe(df_reminders[['title', 'reminder_date', 'assigned_user', 'details']], width='stretch', hide_index=True)
-    else:
-        st.info("No reminders yet. Add one above.")
+# --- REMINDERS PAGES ---
+def page_add_reminder():
+    st.header("⏰ Add New Reminder")
+    with st.form("add_reminder_form"):
+        title = st.text_input("Reminder Title")
+        reminder_date = st.date_input("Reminder Date")
+        assigned_user = st.selectbox("For", ["Pramodh", "Manasa", "Ours"])
+        details = st.text_area("Details (optional)")
+        submitted = st.form_submit_button("Add Reminder")
+        if submitted and title:
+            data = {"title": title, "reminder_date": reminder_date.isoformat(), "assigned_user": assigned_user, "details": details}
+            add_record("reminders", data)
+            st.session_state.page = "Reminders_View_&_Edit"
+            st.rerun()
 
-# --- IMPORTANT DATES PAGE ---
-def page_important_dates():
-    st.header("🗓️ Important Dates")
-    with st.expander("➕ Add a new Important Date", expanded=False):
-        with st.form("add_impdate_form"):
-            event_name = st.text_input("Event Name (e.g., Manasa's Birthday)")
-            event_date = st.date_input("Event Date")
-            category = st.selectbox("Category", ["Birthday", "Anniversary", "Holiday", "Other"])
-            notes = st.text_area("Notes (optional)")
-            submitted = st.form_submit_button("Add Date")
-            if submitted and event_name:
-                data = {"event_name": event_name, "event_date": event_date.isoformat(), "category": category, "notes": notes}
-                add_record("impdates", data)
-                st.rerun()
+def page_view_reminders():
+    st.header("⏰ View & Edit Reminders")
+    df = get_all_data("reminders")
+    if df.empty:
+        st.info("No reminders available. Add one to get started.")
+        return
 
-    df_impdates = get_all_data("impdates")
-    if not df_impdates.empty:
-        st.dataframe(df_impdates[['event_name', 'event_date', 'category', 'notes']], width='stretch', hide_index=True)
-    else:
-        st.info("No important dates yet. Add one above.")
+    st.dataframe(df[['id', 'title', 'reminder_date', 'assigned_user']], use_container_width=True, hide_index=True)
+    st.divider()
 
-# --- TRAVEL PAGE ---
-def page_travel():
-    st.header("✈️ Travel Planner")
-    with st.expander("➕ Add a new Trip", expanded=False):
-        with st.form("add_travel_form"):
-            destination = st.text_input("Destination")
-            start_date = st.date_input("Start Date")
-            end_date = st.date_input("End Date")
-            status = st.selectbox("Status", ["Planned", "Booked", "Completed"])
-            notes = st.text_area("Notes (Flight details, hotel, etc.)")
-            submitted = st.form_submit_button("Add Trip")
-            if submitted and destination:
-                if start_date <= end_date:
-                    data = {"destination": destination, "start_date": start_date.isoformat(), "end_date": end_date.isoformat(), "status": status, "notes": notes}
-                    add_record("travel", data)
+    item_id = st.number_input("Enter Reminder ID to Edit/Delete", min_value=1, step=1, value=None)
+    if item_id:
+        selected_item = df[df['id'] == item_id]
+        if not selected_item.empty:
+            item = selected_item.iloc[0]
+            st.subheader(f"Editing Reminder ID: {item_id}")
+            title = st.text_input("Title", value=item['title'])
+            reminder_date = st.date_input("Date", value=item['reminder_date'])
+            assigned_user = st.selectbox("For", ["Pramodh", "Manasa", "Ours"], index=["Pramodh", "Manasa", "Ours"].index(item['assigned_user']))
+            details = st.text_area("Details", value=item['details'])
+            
+            update_col, delete_col = st.columns(2)
+            with update_col:
+                if st.button("Update Reminder"):
+                    data = {"title": title, "reminder_date": reminder_date.isoformat(), "assigned_user": assigned_user, "details": details}
+                    update_record("reminders", item_id, data)
                     st.rerun()
-                else:
-                    st.warning("End date must be on or after the start date.")
-    
-    df_travel = get_all_data("travel")
-    if not df_travel.empty:
-        st.dataframe(df_travel[['destination', 'start_date', 'end_date', 'status', 'notes']], width='stretch', hide_index=True)
-    else:
-        st.info("No travel plans yet. Add one above.")
+            with delete_col:
+                if st.button("Delete Reminder", type="primary"):
+                    delete_record("reminders", item_id)
+                    st.rerun()
+        else:
+            st.warning("Reminder ID not found.")
 
+# --- IMPORTANT DATES PAGES ---
+def page_add_impdate():
+    st.header("🗓️ Add Important Date")
+    with st.form("add_impdate_form"):
+        event_name = st.text_input("Event Name (e.g., Manasa's Birthday)")
+        event_date = st.date_input("Event Date")
+        category = st.selectbox("Category", ["Birthday", "Anniversary", "Holiday", "Other"])
+        notes = st.text_area("Notes (optional)")
+        submitted = st.form_submit_button("Add Date")
+        if submitted and event_name:
+            data = {"event_name": event_name, "event_date": event_date.isoformat(), "category": category, "notes": notes}
+            add_record("impdates", data)
+            st.session_state.page = "Important_Dates_View_&_Edit"
+            st.rerun()
+            
+def page_view_impdates():
+    st.header("🗓️ View & Edit Important Dates")
+    df = get_all_data("impdates")
+    if df.empty:
+        st.info("No dates available.")
+        return
+        
+    st.dataframe(df[['id', 'event_name', 'event_date', 'category']], use_container_width=True, hide_index=True)
+    st.divider()
+    
+    item_id = st.number_input("Enter Date ID to Edit/Delete", min_value=1, step=1, value=None)
+    if item_id:
+        selected_item = df[df['id'] == item_id]
+        if not selected_item.empty:
+            item = selected_item.iloc[0]
+            st.subheader(f"Editing Date ID: {item_id}")
+            event_name = st.text_input("Event Name", value=item['event_name'])
+            event_date = st.date_input("Event Date", value=item['event_date'])
+            category = st.selectbox("Category", ["Birthday", "Anniversary", "Holiday", "Other"], index=["Birthday", "Anniversary", "Holiday", "Other"].index(item['category']))
+            notes = st.text_area("Notes", value=item['notes'])
+            
+            update_col, delete_col = st.columns(2)
+            with update_col:
+                if st.button("Update Date"):
+                    data = {"event_name": event_name, "event_date": event_date.isoformat(), "category": category, "notes": notes}
+                    update_record("impdates", item_id, data)
+                    st.rerun()
+            with delete_col:
+                if st.button("Delete Date", type="primary"):
+                    delete_record("impdates", item_id)
+                    st.rerun()
+        else:
+            st.warning("Date ID not found.")
+
+# --- TRAVEL PAGES ---
+def page_add_travel():
+    st.header("✈️ Add New Trip")
+    with st.form("add_travel_form"):
+        destination = st.text_input("Destination")
+        start_date = st.date_input("Start Date")
+        end_date = st.date_input("End Date")
+        status = st.selectbox("Status", ["Planned", "Booked", "Completed"])
+        budget = st.number_input("Budget (Optional)", min_value=0.0, format="%.2f")
+        notes = st.text_area("Notes (Flight details, hotel, etc.)")
+        submitted = st.form_submit_button("Add Trip")
+        if submitted and destination:
+            if start_date <= end_date:
+                data = {"destination": destination, "start_date": start_date.isoformat(), "end_date": end_date.isoformat(), "status": status, "budget": budget, "notes": notes}
+                add_record("travel", data)
+                st.session_state.page = "Travel_View_&_Edit"
+                st.rerun()
+            else:
+                st.warning("End date must be on or after the start date.")
+
+def page_view_travel():
+    st.header("✈️ View & Edit Trips")
+    df = get_all_data("travel")
+    if df.empty:
+        st.info("No travel plans available.")
+        return
+
+    st.dataframe(df[['id', 'destination', 'start_date', 'end_date', 'status', 'budget']], use_container_width=True, hide_index=True)
+    st.divider()
+
+    item_id = st.number_input("Enter Trip ID to Edit/Delete", min_value=1, step=1, value=None)
+    if item_id:
+        selected_item = df[df['id'] == item_id]
+        if not selected_item.empty:
+            item = selected_item.iloc[0]
+            st.subheader(f"Editing Trip ID: {item_id}")
+            destination = st.text_input("Destination", value=item['destination'])
+            start_date = st.date_input("Start Date", value=item['start_date'])
+            end_date = st.date_input("End Date", value=item['end_date'])
+            status = st.selectbox("Status", ["Planned", "Booked", "Completed"], index=["Planned", "Booked", "Completed"].index(item['status']))
+            budget = st.number_input("Budget", value=float(item.get('budget', 0.0)), format="%.2f")
+            notes = st.text_area("Notes", value=item['notes'])
+            
+            update_col, delete_col = st.columns(2)
+            with update_col:
+                if st.button("Update Trip"):
+                    data = {"destination": destination, "start_date": start_date.isoformat(), "end_date": end_date.isoformat(), "status": status, "budget": budget, "notes": notes}
+                    update_record("travel", item_id, data)
+                    st.rerun()
+            with delete_col:
+                if st.button("Delete Trip", type="primary"):
+                    delete_record("travel", item_id)
+                    st.rerun()
+        else:
+            st.warning("Trip ID not found.")
 
 # ===============================
 # MAIN APP UI & NAVIGATION
 # ===============================
+def create_sidebar_nav():
+    st.sidebar.title("App Sections")
+    
+    pages = {
+        "Home": "🏠 Home",
+        "Finances": "💰 Finances",
+        "To-Do": "✅ To-Do",
+        "Reminders": "⏰ Reminders",
+        "Important Dates": "🗓️ Important Dates",
+        "Travel": "✈️ Travel"
+    }
+    
+    sub_pages = {
+        "Finances": ["Add Transaction", "Update / Delete", "View Summaries"],
+        "Reminders": ["View & Edit", "Add New"],
+        "Important Dates": ["View & Edit", "Add New"],
+        "Travel": ["View & Edit", "Add New"]
+    }
+
+    if 'page' not in st.session_state:
+        st.session_state.page = "Home"
+
+    for page, label in pages.items():
+        if st.sidebar.button(label, use_container_width=True):
+            if page in sub_pages:
+                st.session_state.page = f"{page.replace(' ', '_')}_{sub_pages[page][0].replace(' ', '_')}"
+            else:
+                st.session_state.page = page
+            st.rerun()
+
+        if st.session_state.page.startswith(page.replace(' ', '_')) and page in sub_pages:
+            try:
+                current_sub_page = st.session_state.page.split(f"{page.replace(' ', '_')}_")[1].replace("_", " ")
+                current_index = sub_pages[page].index(current_sub_page)
+            except (ValueError, IndexError):
+                current_index = 0
+            
+            selected_sub_page = st.sidebar.radio(
+                f"{page} Menu", sub_pages[page], index=current_index, label_visibility="collapsed"
+            )
+            
+            new_page_state = f"{page.replace(' ', '_')}_{selected_sub_page.replace(' ', '_')}"
+            if st.session_state.page != new_page_state:
+                st.session_state.page = new_page_state
+                st.rerun()
+
 # --- Header and Logout ---
 _, user_col, logout_col = st.columns([0.75, 0.15, 0.1])
 with user_col:
@@ -456,75 +734,20 @@ with logout_col:
         st.rerun()
     st.markdown('</div>', unsafe_allow_html=True)
 
-# --- Sidebar Navigation ---
-st.sidebar.title("App Sections")
-
-if 'page' not in st.session_state:
-    st.session_state.page = "Home"
-
-with st.sidebar:
-    if st.button("🏠 Home", width='stretch'):
-        st.session_state.page = "Home"
-        st.rerun()
-
-    if st.button("💰 Finances", width='stretch'):
-        if not st.session_state.page.startswith("Finances"):
-            st.session_state.page = "Finances_Add_Transaction"
-            st.rerun()
-    
-    if st.session_state.page.startswith("Finances"):
-        sub_page_options = ["Add Transaction", "Update / Delete", "View Summaries"]
-        
-        try:
-            current_sub_page_str = st.session_state.page.split("_")[1].replace("_", " ")
-            current_index = sub_page_options.index(current_sub_page_str)
-        except (ValueError, IndexError):
-            current_index = 0 
-        
-        finance_sub_page = st.radio(
-            "Finance Pages",
-            sub_page_options,
-            key="finance_sub_page",
-            label_visibility="collapsed",
-            index=current_index
-        )
-        new_page_state = f"Finances_{finance_sub_page.replace(' ', '_')}"
-        if st.session_state.page != new_page_state:
-            st.session_state.page = new_page_state
-            st.rerun()
-
-    if st.button("✅ To-Do", width='stretch'):
-        st.session_state.page = "To-Do"
-        st.rerun()
-    if st.button("⏰ Reminders", width='stretch'):
-        st.session_state.page = "Reminders"
-        st.rerun()
-    if st.button("🗓️ Important Dates", width='stretch'):
-        st.session_state.page = "Important Dates"
-        st.rerun()
-    if st.button("✈️ Travel", width='stretch'):
-        st.session_state.page = "Travel"
-        st.rerun()
+create_sidebar_nav()
 
 # --- Page Routing ---
 page_key = st.session_state.get('page', 'Home')
-
-if page_key == "Home":
-    page_home()
-elif page_key == "Finances_Add_Transaction":
-    page_add_transaction()
-elif page_key == "Finances_Update_/_Delete":
-    page_update_transaction()
-elif page_key == "Finances_View_Summaries":
-    page_view_summary()
-elif page_key == "To-Do":
-    page_todo()
-elif page_key == "Reminders":
-    page_reminders()
-elif page_key == "Important Dates":
-    page_important_dates()
-elif page_key == "Travel":
-    page_travel()
-else:
-    page_home()
+if page_key == "Home": page_home()
+elif page_key == "Finances_Add_Transaction": page_add_transaction()
+elif page_key == "Finances_Update_/_Delete": page_update_transaction()
+elif page_key == "Finances_View_Summaries": page_view_summary()
+elif page_key == "To-Do": page_todo()
+elif page_key == "Reminders_View_&_Edit": page_view_reminders()
+elif page_key == "Reminders_Add_New": page_add_reminder()
+elif page_key == "Important_Dates_View_&_Edit": page_view_impdates()
+elif page_key == "Important_Dates_Add_New": page_add_impdate()
+elif page_key == "Travel_View_&_Edit": page_view_travel()
+elif page_key == "Travel_Add_New": page_add_travel()
+else: page_home()
 
